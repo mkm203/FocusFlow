@@ -1,0 +1,124 @@
+@baseUrl = http://localhost:5001/api
+
+### 1. OFFLINE ISOLATION: health needs no token (expect 200)
+GET {{baseUrl}}/health
+
+### 2. Register a cloud account (expect 201)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{ "email": "student@focusflow.cm", "password": "Password123" }
+
+### 3. Register a second account for the isolation test
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{ "email": "other@focusflow.cm", "password": "Password123" }
+
+### 4. Login (expect 200 with a token)
+# @name loginA
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "student@focusflow.cm", "password": "Password123" }
+
+### 5. Login as the second user
+# @name loginB
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "other@focusflow.cm", "password": "Password123" }
+
+### ---------- ACCESS CONTROL (expect 401) ----------
+
+### 6. Unauthenticated backup upload
+POST {{baseUrl}}/backups
+Content-Type: application/json
+
+{ "backup_title": "no token", "data_payload": { "a": 1 } }
+
+### 7. Invalid token
+GET {{baseUrl}}/backups
+Authorization: Bearer abc.def.ghi
+
+### ---------- FUNCTIONAL TESTS ----------
+
+### 8. Create a backup (expect 201)
+# @name createBackup
+@tokenA = {{loginA.response.body.token}}
+POST {{baseUrl}}/backups
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{
+  "backup_title": "v1.0-initial-state-backup",
+  "data_payload": { "settings": { "theme": "dark", "notifications": true }, "tasks": [{ "title": "Étudier", "done": false }] }
+}
+
+### 9. List my backups (expect 200, no payloads)
+GET {{baseUrl}}/backups
+Authorization: Bearer {{tokenA}}
+
+### 10. Get one backup with its payload
+@backupId = {{createBackup.response.body.data.id}}
+GET {{baseUrl}}/backups/{{backupId}}
+Authorization: Bearer {{tokenA}}
+
+### 11. RESTORE the saved state
+GET {{baseUrl}}/backups/{{backupId}}/restore
+Authorization: Bearer {{tokenA}}
+
+### 12. Update the backup
+PUT {{baseUrl}}/backups/{{backupId}}
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{ "backup_title": "v1.1-updated-state-backup", "data_payload": { "settings": { "theme": "light", "notifications": false } } }
+
+### ---------- AUTHORIZATION (expect 404: another user's data is invisible) ----------
+
+### 13. Second user reads the first user's backup
+@tokenB = {{loginB.response.body.token}}
+GET {{baseUrl}}/backups/{{backupId}}
+Authorization: Bearer {{tokenB}}
+
+### 14. Second user deletes the first user's backup
+DELETE {{baseUrl}}/backups/{{backupId}}
+Authorization: Bearer {{tokenB}}
+
+### ---------- PAYLOAD REJECTION (expect 400) ----------
+
+### 15. Malformed JSON body
+POST {{baseUrl}}/backups
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{ "backup_title": "broken",
+
+### 16. Missing payload
+POST {{baseUrl}}/backups
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{ "backup_title": "no payload" }
+
+### 17. Payload that is not JSON data
+POST {{baseUrl}}/backups
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{ "backup_title": "bad", "data_payload": "{not valid json" }
+
+### 18. SQL injection in the id (expect 400)
+GET {{baseUrl}}/backups/1%20OR%201=1
+Authorization: Bearer {{tokenA}}
+
+### 19. SQL injection in login (expect 401, no bypass)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "' OR '1'='1", "password": "' OR '1'='1" }
+
+### 20. Delete my backup (expect 200)
+DELETE {{baseUrl}}/backups/{{backupId}}
+Authorization: Bearer {{tokenA}}
